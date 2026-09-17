@@ -3,7 +3,7 @@
 </style></head><body>
 <div class="toolbar">‹ <span>BlockMarket Mods</span></div><div class="app"><aside class="side"><button class="active" data-l="">🏠</button><button data-l="fabric">🧵</button><button data-l="forge">⚒️</button><button data-l="neoforge">🧩</button><button data-l="quilt">🪡</button></aside><main class="main">
 <div class="top"><div class="logo">BLOCKMARKET <span>MODS</span></div><select id="loader" class="loader"><option value="">All loaders</option><option value="fabric">Fabric</option><option value="forge">Forge</option><option value="neoforge">NeoForge</option><option value="quilt">Quilt</option></select><input id="search" class="search" placeholder="Search mods..."><button id="refresh" class="refresh">↻ Refresh</button></div>
-<div id="status" class="status">Loading BlockMarket catalogue...</div><div class="hero"><div style="font-size:30px">🧱</div><div><b>Real Minecraft Mods</b><br><small>Automatically refreshed from Modrinth • 1,000+ downloads • real .jar files</small></div></div><div id="section" class="section">Popular mods</div><div id="grid" class="grid"></div><button id="more" class="more" style="display:none">LOAD MORE</button><div class="foot">Mod information and files come from Modrinth. BlockMarket does not re-host mod files.</div>
+<div id="status" class="status">Loading BlockMarket catalogue...</div><div class="hero"><div style="font-size:30px">🧱</div><div><b>Real Minecraft Mods</b><br><small>Automatically refreshed from Modrinth • 1,000+ downloads • Modrinth pages and real .jar files</small></div></div><div id="section" class="section">Popular mods</div><div id="grid" class="grid"></div><button id="more" class="more" style="display:none">LOAD MORE</button><div class="foot">Mod information and files come from Modrinth. BlockMarket does not re-host mod files.</div>
 </main></div>
 <div id="modal" class="modal"><div class="box"><div class="head"><img id="mi" alt=""><div><h2 id="mt">Mod</h2><div id="mm" class="mmeta"></div></div></div><div id="md" class="mdesc"></div><div class="actions"><a id="jar">⬇ DOWNLOAD .JAR</a><a id="page" target="_blank" rel="noopener">OPEN MODRINTH PAGE</a><button class="close" onclick="closeModal()">CLOSE</button></div></div></div>
 <script>
@@ -14,25 +14,32 @@ const $=id=>document.getElementById(id),grid=$('grid'),status=$('status');
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fd(n){n=Number(n)||0;return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n)}
 function stat(t,c=''){status.className='status'+(c?' '+c:'');status.textContent=t}
-function card(m){const vs=(m.versions||[]).slice(0,4).join(', ');return `<article class="card" onclick="openMod('${esc(m.id)}')"><div class="pic">${m.icon_url?`<img loading="lazy" src="${esc(m.icon_url)}" alt="">`:'🧱'}</div><div class="body"><div class="title" title="${esc(m.title)}">${esc(m.title)}</div><div class="desc">${esc(m.description||'Minecraft mod')}</div><div class="meta">${esc((m.loaders||[]).join(' • ')||'Loader not listed')}<br>${esc(vs||'Multiple versions')}</div><div class="downs">⬇ ${fd(m.downloads)} downloads</div><button class="dl" onclick="downloadLatest(event,'${esc(m.id)}')">⬇ DOWNLOAD .JAR</button></div></article>`}
+function modPageUrl(m){const slug=m.slug||m.id;return 'https://modrinth.com/mod/'+encodeURIComponent(slug)}
+function card(m){const vs=(m.versions||[]).slice(0,4).join(', ');const url=modPageUrl(m);return `<article class="card" onclick="openMod('${esc(m.id)}')"><div class="pic">${m.icon_url?`<img loading="lazy" src="${esc(m.icon_url)}" alt="">`:'🧱'}</div><div class="body"><div class="title" title="${esc(m.title)}">${esc(m.title)}</div><div class="desc">${esc(m.description||'Minecraft mod')}</div><div class="meta">${esc((m.loaders||[]).join(' • ')||'Loader not listed')}<br>${esc(vs||'Multiple versions')}</div><div class="downs">⬇ ${fd(m.downloads)} downloads</div><a class="dl" href="${url}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">↗ OPEN MODRINTH PAGE</a></div></article>`}
 function render(){grid.innerHTML=filtered.length?filtered.map(card).join(''):'<div class="empty">No mods matched that search.</div>'; $('more').style.display='block'}
 function apply(){const q=query.toLowerCase();filtered=all.filter(m=>(!loader||(m.loaders||[]).includes(loader))&&(!q||(m.title+' '+m.description+' '+(m.categories||[]).join(' ')).toLowerCase().includes(q))&&Number(m.downloads)>=1000);render()}
-function facets(){const f=[["project_type:mod"]];if(loader)f.push([`categories:${loader}`]);return encodeURIComponent(JSON.stringify(f))}
+function facets(){const f=[["project_type:mod"]];if(loader)f.push([`categories:${loader}`]);return JSON.stringify(f)}
 async function fetchPage(reset=false){if(loading)return;loading=true;if(reset){all=[];offset=0;grid.innerHTML='';stat('Connecting to Modrinth...')}
  try{
    const params=new URLSearchParams({limit:String(PAGE),offset:String(offset),index:'downloads',facets:facets()});
    if(query)params.set('query',query);
-   const r=await fetch(API+'/search?'+params.toString(),{cache:'no-store'});
+   let r=await fetch(API+'/search?'+params.toString(),{cache:'no-store',headers:{'Accept':'application/json'}});
+   if(!r.ok && loader){
+     const fallback=new URLSearchParams({limit:String(PAGE),offset:String(offset),index:'downloads',facets:JSON.stringify([["project_type:mod"]])});
+     if(query)fallback.set('query',query);
+     r=await fetch(API+'/search?'+fallback.toString(),{cache:'no-store',headers:{'Accept':'application/json'}});
+   }
    if(!r.ok)throw new Error('Modrinth API HTTP '+r.status);
    const d=await r.json();
    const incoming=(d.hits||[]).filter(m=>m.project_type==='mod'&&Number(m.downloads)>=1000);
    all=all.concat(incoming);offset+=PAGE;apply();
    stat(`Connected to Modrinth • ${all.length.toLocaleString()} mods with 1,000+ downloads`,'good');
    if((d.hits||[]).length<PAGE)$('more').style.display='none';
- }catch(e){console.error(e);if(!all.length){grid.innerHTML='<div class="empty">Could not connect to Modrinth.<br><br>Please check your internet connection and refresh the page.</div>';stat('Could not connect to Modrinth','bad')}}finally{loading=false}}
+ }catch(e){console.error(e);if(!all.length){grid.innerHTML='<div class="empty">Could not connect to Modrinth.<br><br>Please check your internet connection and refresh the page.</div>';stat('Could not connect to Modrinth — please refresh','bad')}}finally{loading=false}}
 async function loadMore(){await fetchPage(false)}
 async function loadData(){await fetchPage(true)}
 function openMod(id){const m=all.find(x=>x.id===id);if(!m)return;$('modal').classList.add('show');$('mt').textContent=m.title;$('mm').textContent=`${fd(m.downloads)} downloads • ${(m.loaders||[]).join(', ')||'Unknown loader'} • ${(m.versions||[]).slice(0,8).join(', ')}`;$('md').textContent=m.description||'No description available.';$('mi').src=m.icon_url||'';$('page').href='https://modrinth.com/mod/'+encodeURIComponent(m.slug||m.id);$('jar').href=m.download_url||('https://modrinth.com/mod/'+encodeURIComponent(m.slug||m.id));$('jar').download=m.download_filename||''}
+function openModPage(e,slug){e.stopPropagation();window.open('https://modrinth.com/mod/'+encodeURIComponent(slug),'_blank','noopener,noreferrer')}
 function downloadLatest(e,id){e.stopPropagation();const m=all.find(x=>x.id===id);if(m&&m.download_url){window.location.href=m.download_url}else openMod(id)}
 function closeModal(){$('modal').classList.remove('show')}
 let timer; $('search').oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{query=$('search').value.trim();$('section').textContent=query?'Search results for “'+query+'”':'Popular mods';loadData()},350)};
