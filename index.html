@@ -7,18 +7,38 @@
 </main></div>
 <div id="modal" class="modal"><div class="box"><div class="head"><img id="mi" alt=""><div><h2 id="mt">Mod</h2><div id="mm" class="mmeta"></div></div></div><div id="md" class="mdesc"></div><div class="actions"><a id="jar">⬇ DOWNLOAD .JAR</a><a id="page" target="_blank" rel="noopener">OPEN MODRINTH PAGE</a><button class="close" onclick="closeModal()">CLOSE</button></div></div></div>
 <script>
-let all=[];let filtered=[];let page=0;const PAGE=24;let loader='';let query='';
+const API='https://api.modrinth.com/v2';
+let all=[], filtered=[], offset=0, loader='', query='', loading=false;
+const PAGE=100;
 const $=id=>document.getElementById(id),grid=$('grid'),status=$('status');
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fd(n){n=Number(n)||0;return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n)}
 function stat(t,c=''){status.className='status'+(c?' '+c:'');status.textContent=t}
 function card(m){const vs=(m.versions||[]).slice(0,4).join(', ');return `<article class="card" onclick="openMod('${esc(m.id)}')"><div class="pic">${m.icon_url?`<img loading="lazy" src="${esc(m.icon_url)}" alt="">`:'🧱'}</div><div class="body"><div class="title" title="${esc(m.title)}">${esc(m.title)}</div><div class="desc">${esc(m.description||'Minecraft mod')}</div><div class="meta">${esc((m.loaders||[]).join(' • ')||'Loader not listed')}<br>${esc(vs||'Multiple versions')}</div><div class="downs">⬇ ${fd(m.downloads)} downloads</div><button class="dl" onclick="downloadLatest(event,'${esc(m.id)}')">⬇ DOWNLOAD .JAR</button></div></article>`}
-function apply(){const q=query.toLowerCase();filtered=all.filter(m=>(!loader||(m.loaders||[]).includes(loader))&&(!q||(m.title+' '+m.description+' '+(m.categories||[]).join(' ')).toLowerCase().includes(q)));page=0;render();stat(`Catalogue ready • ${filtered.length.toLocaleString()} matching mods`,'good');}
-function render(){const shown=filtered.slice(0,(page+1)*PAGE);grid.innerHTML=shown.length?shown.map(card).join(''):'<div class="empty">No mods matched that search.</div>';$('more').style.display=shown.length<filtered.length?'block':'none'}
-async function loadData(){stat('Loading BlockMarket catalogue...');try{const r=await fetch('./data/mods.json?cache='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();all=Array.isArray(d.mods)?d.mods:[];if(!all.length)throw Error('empty catalogue');apply();stat(`Connected • ${all.length.toLocaleString()} mods • updated ${d.updatedAt?new Date(d.updatedAt).toLocaleString(): 'by GitHub Actions'}`,'good')}catch(e){console.error(e);grid.innerHTML='<div class="empty">The BlockMarket catalogue has not been generated yet.<br><br>GitHub Actions needs to run the Modrinth updater once. Open the repository’s <b>Actions</b> tab and run <b>Update Modrinth catalogue</b>, then refresh this page.</div>';stat('Catalogue not generated yet.','bad')}}
-function showMore(){page++;render()}
+function render(){grid.innerHTML=filtered.length?filtered.map(card).join(''):'<div class="empty">No mods matched that search.</div>'; $('more').style.display='block'}
+function apply(){const q=query.toLowerCase();filtered=all.filter(m=>(!loader||(m.loaders||[]).includes(loader))&&(!q||(m.title+' '+m.description+' '+(m.categories||[]).join(' ')).toLowerCase().includes(q))&&Number(m.downloads)>=1000);render()}
+function facets(){const f=[["project_type:mod"]];if(loader)f.push([`categories:${loader}`]);return encodeURIComponent(JSON.stringify(f))}
+async function fetchPage(reset=false){if(loading)return;loading=true;if(reset){all=[];offset=0;grid.innerHTML='';stat('Connecting to Modrinth...')}
+ try{
+   const params=new URLSearchParams({limit:String(PAGE),offset:String(offset),index:'downloads',facets:facets()});
+   if(query)params.set('query',query);
+   const r=await fetch(API+'/search?'+params.toString(),{cache:'no-store'});
+   if(!r.ok)throw new Error('Modrinth API HTTP '+r.status);
+   const d=await r.json();
+   const incoming=(d.hits||[]).filter(m=>m.project_type==='mod'&&Number(m.downloads)>=1000);
+   all=all.concat(incoming);offset+=PAGE;apply();
+   stat(`Connected to Modrinth • ${all.length.toLocaleString()} mods with 1,000+ downloads`,'good');
+   if((d.hits||[]).length<PAGE)$('more').style.display='none';
+ }catch(e){console.error(e);if(!all.length){grid.innerHTML='<div class="empty">Could not connect to Modrinth.<br><br>Please check your internet connection and refresh the page.</div>';stat('Could not connect to Modrinth','bad')}}finally{loading=false}}
+async function loadMore(){await fetchPage(false)}
+async function loadData(){await fetchPage(true)}
 function openMod(id){const m=all.find(x=>x.id===id);if(!m)return;$('modal').classList.add('show');$('mt').textContent=m.title;$('mm').textContent=`${fd(m.downloads)} downloads • ${(m.loaders||[]).join(', ')||'Unknown loader'} • ${(m.versions||[]).slice(0,8).join(', ')}`;$('md').textContent=m.description||'No description available.';$('mi').src=m.icon_url||'';$('page').href='https://modrinth.com/mod/'+encodeURIComponent(m.slug||m.id);$('jar').href=m.download_url||('https://modrinth.com/mod/'+encodeURIComponent(m.slug||m.id));$('jar').download=m.download_filename||''}
 function downloadLatest(e,id){e.stopPropagation();const m=all.find(x=>x.id===id);if(m&&m.download_url){window.location.href=m.download_url}else openMod(id)}
 function closeModal(){$('modal').classList.remove('show')}
-$('search').oninput=()=>{query=$('search').value.trim();$('section').textContent=query?'Search results for “'+query+'”':'Popular mods';apply()};$('loader').onchange=()=>{loader=$('loader').value;sync();apply()};$('refresh').onclick=loadData;$('more').onclick=showMore;document.querySelectorAll('.side button').forEach(b=>b.onclick=()=>{loader=b.dataset.l||'';$('loader').value=loader;sync();apply()});function sync(){document.querySelectorAll('.side button').forEach(b=>b.classList.toggle('active',(b.dataset.l||'')===loader))}$('modal').onclick=e=>{if(e.target===$('modal'))closeModal()};addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});loadData();
+let timer; $('search').oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{query=$('search').value.trim();$('section').textContent=query?'Search results for “'+query+'”':'Popular mods';loadData()},350)};
+$('loader').onchange=()=>{loader=$('loader').value;sync();loadData()};$('refresh').onclick=loadData;$('more').onclick=loadMore;
+document.querySelectorAll('.side button').forEach(b=>b.onclick=()=>{loader=b.dataset.l||'';$('loader').value=loader;sync();loadData()});
+function sync(){document.querySelectorAll('.side button').forEach(b=>b.classList.toggle('active',(b.dataset.l||'')===loader))}
+$('modal').onclick=e=>{if(e.target===$('modal'))closeModal()};addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+loadData();
 </script></body></html>
